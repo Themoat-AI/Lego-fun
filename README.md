@@ -1,65 +1,33 @@
 # Lego Fun
 
-A kid-friendly LEGO organization app with:
+Next.js app using Supabase for authentication, organization data, realtime chat/feed updates, and private video storage. The UI contains no seeded/mock organizations, messages, posts, or media.
 
-- Username creation and kid-safe validation
-- LEGO organizations for clubs and teams
-- Daily signup tracking with a max of 15 people per day
-- Project and part requests
-- Classroom-style live stream feed
-- Team chat for organizations
-- Google Drive-style shared media library for uploaded videos
-- Supabase and Firebase status checks, with safe demo mode if credentials are missing
+## Configure Supabase
 
-## Stack
+1. Create a Supabase project.
+2. In its SQL Editor, run `supabase/schema.sql` in full. This provisions tables, RLS policies, membership/signup RPCs, a private media bucket, and Realtime publication entries.
+3. In Supabase Auth settings, configure email confirmation and production SMTP. Keep public signups appropriately restricted; use caregiver-managed accounts and review consent/privacy obligations before processing children's data.
+4. Copy `.env.example` to `.env.local` and set the Project URL and anon/publishable key from Supabase Project Settings → API. Never use a service-role key in the browser or a `NEXT_PUBLIC_*` variable.
+5. In Vercel, import the repository with the **Next.js** preset and root directory. Add the same two public Supabase variables to Preview and Production environment settings. Use Node.js 20+. Deploy after the schema and auth settings are ready.
 
-- Next.js
-- TypeScript
-- React
-- CSS modules via global stylesheet
+Vercel cannot create or infer the Supabase project or credentials. Until those external steps are completed, the app intentionally displays setup instructions rather than falling back to fake data.
 
-## Run locally
-
-1. Install dependencies:
+## Local development
 
 ```bash
 npm install
-```
-
-2. Start the app:
-
-```bash
+cp .env.example .env.local
+# set the Supabase values in .env.local
 npm run dev
 ```
 
-3. Open the app in your browser:
+Validation scripts: `npm run lint`, `npm run typecheck`, `npm run build`.
 
-```text
-http://localhost:3000
-```
+## Features and limitations
 
-## Environment variables
-
-Copy the example file and add your real credentials:
-
-```bash
-cp .env.example .env.local
-```
-
-Optional values used by the app for Supabase and Firebase readiness checks:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `NEXT_PUBLIC_FIREBASE_API_KEY`
-- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
-- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
-- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
-- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
-- `NEXT_PUBLIC_FIREBASE_APP_ID`
-- `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID`
-
-If the credentials are not filled in, the app stays in safe demo mode instead of crashing.
-
-## Notes
-
-This is a polished front-end prototype focused on the requested product flow. It is designed to be expanded with real Supabase auth, chat tables, Firebase Firestore, and Google Drive API integration once credentials are added.
+- Caregiver email/password sign-up/sign-in uses Supabase Auth.
+- Authenticated members can create/join organizations; RLS protects org data.
+- Posts and team chat are persisted in Postgres and refreshed through Supabase Realtime.
+- Daily signup limits are enforced transactionally by a database RPC, not only in the UI.
+- Private video files are uploaded to Supabase Storage with a 100 MB limit and access is provided using short-lived signed URLs.
+- Admin moderation, reporting/blocking, parental consent/age assurance, retention/deletion workflows, custom SMTP, rate limiting, and legal/privacy review still need to be planned and configured for an actual child-directed service. Do not claim regulatory compliance from this starter schema alone.

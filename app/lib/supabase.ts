@@ -1,10 +1,14 @@
-export function getSupabaseStatus() {
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+
+let client: SupabaseClient | null = null;
+
+export function getSupabaseClient(): SupabaseClient | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!url || !anonKey) {
-    return { label: 'Demo mode: Supabase not connected', enabled: false };
-  }
-
-  return { label: 'Supabase connected', enabled: true };
+  if (!url || !anonKey) return null;
+  if (!client) client = createClient(url, anonKey, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+  });
+  return client;
 }
