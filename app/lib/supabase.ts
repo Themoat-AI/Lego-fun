@@ -1,10 +1,22 @@
-export function getSupabaseStatus() {
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+
+let client: SupabaseClient | null = null;
+
+export function isSupabaseConfigured() {
+  return Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+}
+
+export function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
-    return { label: 'Demo mode: Supabase not connected', enabled: false };
+    throw new Error('Supabase is not configured. Add the public URL and anon key to your environment.');
   }
 
-  return { label: 'Supabase connected', enabled: true };
+  if (!client) client = createClient(url, anonKey);
+  return client;
 }
