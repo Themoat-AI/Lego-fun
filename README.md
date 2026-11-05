@@ -1,65 +1,28 @@
 # Lego Fun
 
-A kid-friendly LEGO organization app with:
+A live, guest-access LEGO club workspace built with Next.js, TypeScript, and Supabase. It includes anonymous Supabase Auth sessions (no email required), persistent profiles, clubs, posts, chat, daily signups, realtime updates, and private video storage. The database starts empty; the app contains no seeded mock data or demo fallback.
 
-- Username creation and kid-safe validation
-- LEGO organizations for clubs and teams
-- Daily signup tracking with a max of 15 people per day
-- Project and part requests
-- Classroom-style live stream feed
-- Team chat for organizations
-- Google Drive-style shared media library for uploaded videos
-- Supabase and Firebase status checks, with safe demo mode if credentials are missing
+## Configure Supabase
 
-## Stack
+1. Create a Supabase project.
+2. In **Project Settings → API**, copy the Project URL and public anon/publishable key. Never use a service-role key in the browser or commit secrets.
+3. Run both SQL files, in filename order, in the Supabase SQL Editor:
+   - `supabase/migrations/20261105000000_live_workspace.sql`
+   - `supabase/migrations/20261106000000_guest_invite_codes.sql`
+4. In **Authentication → Providers → Anonymous**, enable anonymous sign-ins. The app does not require email authentication. A guest account is tied to its browser session and may not be recoverable if browser data is cleared.
+5. Set the Supabase Auth site URL to your Vercel domain and add your production domain and `http://localhost:3000` as allowed URLs if needed.
+6. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to `.env.local` and Vercel environment variables, then redeploy.
+7. Run `npm install` and `npm run dev` for local testing.
 
-- Next.js
-- TypeScript
-- React
-- CSS modules via global stylesheet
+Create a club and share its invite code only with people you trust. Club posts, chat, and video files remain limited to club members by row-level security. No sample content is inserted.
 
-## Run locally
+## Features and safety notes
 
-1. Install dependencies:
+- Anonymous sign-in; no email address is requested. Guest access still uses Supabase Auth so database policies can identify each session.
+- Persistent profiles, clubs, membership, posts, messages, daily signup records, and media metadata.
+- Club membership and daily signup caps are enforced in database functions.
+- Live feed, chat, membership, and media-list refreshes via Supabase Realtime.
+- Private video bucket, member-only reads, signed links, MIME allowlist, and 50 MB limit.
+- Shareable invite codes allow trusted guests to join without making clubs or their content publicly browseable.
 
-```bash
-npm install
-```
-
-2. Start the app:
-
-```bash
-npm run dev
-```
-
-3. Open the app in your browser:
-
-```text
-http://localhost:3000
-```
-
-## Environment variables
-
-Copy the example file and add your real credentials:
-
-```bash
-cp .env.example .env.local
-```
-
-Optional values used by the app for Supabase and Firebase readiness checks:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `NEXT_PUBLIC_FIREBASE_API_KEY`
-- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
-- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
-- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
-- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
-- `NEXT_PUBLIC_FIREBASE_APP_ID`
-- `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID`
-
-If the credentials are not filled in, the app stays in safe demo mode instead of crashing.
-
-## Notes
-
-This is a polished front-end prototype focused on the requested product flow. It is designed to be expanded with real Supabase auth, chat tables, Firebase Firestore, and Google Drive API integration once credentials are added.
+Guest sessions are not recoverable across lost browser sessions. For children, adult moderation, reporting, consent, and privacy review are still necessary; technical access controls are not legal advice or a child-safety certification. This repository change cannot create Supabase credentials or change Vercel settings for you.
