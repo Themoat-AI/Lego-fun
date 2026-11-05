@@ -16,7 +16,8 @@ A kid-friendly LEGO organization app with:
 - Next.js
 - TypeScript
 - React
-- CSS modules via global stylesheet
+- Firebase Web SDK with Cloud Firestore initialization
+- Supabase configuration retained
 
 ## Run locally
 
@@ -26,40 +27,30 @@ A kid-friendly LEGO organization app with:
 npm install
 ```
 
-2. Start the app:
-
-```bash
-npm run dev
-```
-
-3. Open the app in your browser:
-
-```text
-http://localhost:3000
-```
-
-## Environment variables
-
-Copy the example file and add your real credentials:
+2. Copy the example environment file and add the Firebase web-app configuration from Firebase Console → Project settings → Your apps:
 
 ```bash
 cp .env.example .env.local
 ```
 
-Optional values used by the app for Supabase and Firebase readiness checks:
+Set the `NEXT_PUBLIC_FIREBASE_*` values in `.env.local`. These are Firebase web-app configuration values, not service-account credentials. Never put a Firebase Admin service-account private key in a `NEXT_PUBLIC_*` variable or commit it to the repository.
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `NEXT_PUBLIC_FIREBASE_API_KEY`
-- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
-- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
-- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
-- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
-- `NEXT_PUBLIC_FIREBASE_APP_ID`
-- `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID`
+3. Enable Cloud Firestore in the Firebase console, then start the app:
 
-If the credentials are not filled in, the app stays in safe demo mode instead of crashing.
+```bash
+npm run dev
+```
 
-## Notes
+4. Open the app in your browser:
 
-This is a polished front-end prototype focused on the requested product flow. It is designed to be expanded with real Supabase auth, chat tables, Firebase Firestore, and Google Drive API integration once credentials are added.
+```text
+http://localhost:3000
+```
+
+Supabase environment variables and status checks remain supported; adding Firebase does not remove Supabase.
+
+## Firebase data and security
+
+The Firebase client and Firestore instance are initialized when the required Firebase web-app config is present. The current page still uses in-memory demo data; organizations, posts, messages, signups, and upload metadata are not yet read from or written to Firestore. Configure Firestore Security Rules and an authentication/membership model before adding persistent user data. Do not use open read/write rules, especially for this kid-focused app. Firebase web configuration is visible to browsers, so access control must be enforced by Security Rules, not by hiding the config.
+
+Cloud Storage uploads are not configured by this change; the current upload control only updates demo state in the browser.
