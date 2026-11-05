@@ -1,35 +1,28 @@
 # Lego Fun
 
-A live, guardian-managed LEGO club workspace built with Next.js, TypeScript, and Supabase. It includes authenticated profiles, clubs, member limits, build-day signups, a realtime feed and chat, and private video storage. The app contains no seeded sample records and does not fall back to mock data.
+A live, guest-access LEGO club workspace built with Next.js, TypeScript, and Supabase. It includes anonymous Supabase Auth sessions (no email required), persistent profiles, clubs, posts, chat, daily signups, realtime updates, and private video storage. The database starts empty; the app contains no seeded mock data or demo fallback.
 
 ## Configure Supabase
 
 1. Create a Supabase project.
-2. In **Project Settings → API**, copy the project URL and the public anon/publishable key. Never use a service-role key in the browser or commit secrets.
-3. Run `supabase/migrations/20261105000000_live_workspace.sql` in the Supabase SQL editor, or apply it using the Supabase CLI.
-4. In Supabase Auth settings, configure the site URL and redirect URLs for localhost and your production domain. Keep email confirmation enabled and use a guardian-managed email account. Configure SMTP for reliable production confirmation email.
-5. For local development, copy `.env.example` to `.env.local` and set:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-6. In Vercel, add the same two public Supabase values to the Production (and Preview, if wanted) environment, then redeploy.
-7. Install and run:
+2. In **Project Settings → API**, copy the Project URL and public anon/publishable key. Never use a service-role key in the browser or commit secrets.
+3. Run both SQL files, in filename order, in the Supabase SQL Editor:
+   - `supabase/migrations/20261105000000_live_workspace.sql`
+   - `supabase/migrations/20261106000000_guest_invite_codes.sql`
+4. In **Authentication → Providers → Anonymous**, enable anonymous sign-ins. The app does not require email authentication. A guest account is tied to its browser session and may not be recoverable if browser data is cleared.
+5. Set the Supabase Auth site URL to your Vercel domain and add your production domain and `http://localhost:3000` as allowed URLs if needed.
+6. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to `.env.local` and Vercel environment variables, then redeploy.
+7. Run `npm install` and `npm run dev` for local testing.
 
-```bash
-npm install
-npm run dev
-```
+Create a club and share its invite code only with people you trust. Club posts, chat, and video files remain limited to club members by row-level security. No sample content is inserted.
 
-The schema is initially empty: create an account and club in the app. No mock records are supplied. Accounts are intended to be controlled by a parent/guardian; do not collect children's email addresses or sensitive personal information.
+## Features and safety notes
 
-## Live features and access controls
+- Anonymous sign-in; no email address is requested. Guest access still uses Supabase Auth so database policies can identify each session.
+- Persistent profiles, clubs, membership, posts, messages, daily signup records, and media metadata.
+- Club membership and daily signup caps are enforced in database functions.
+- Live feed, chat, membership, and media-list refreshes via Supabase Realtime.
+- Private video bucket, member-only reads, signed links, MIME allowlist, and 50 MB limit.
+- Shareable invite codes allow trusted guests to join without making clubs or their content publicly browseable.
 
-- Supabase Auth email/password sign-up and sign-in; guardian email confirmation depends on your Supabase Auth settings.
-- Persistent profiles, clubs, membership, posts, messages, and daily signup records.
-- Row Level Security restricts club content to members; membership and daily signup limits are enforced by database RPCs so concurrent requests cannot bypass the limits.
-- Realtime updates for the feed, chat, membership, and media list. The migration adds the tables to the `supabase_realtime` publication.
-- Private `org-media` storage bucket, member-only object reads, signed video links, MP4/MOV/WebM allowlist, and 50 MB upload cap.
-- No Firebase dependency and no mock-data fallback.
-
-## Production checklist
-
-Before inviting families, review child privacy and consent requirements applicable to your location and use case, establish adult moderation/reporting and account-removal processes, test RLS with separate accounts, and configure backups, SMTP, and Supabase/Vercel billing limits. This software's technical controls are not legal advice or a child-safety certification. Real-time status and uploads require the Supabase project setup above; this GitHub change cannot create credentials or change your Vercel project settings for you.
+Guest sessions are not recoverable across lost browser sessions. For children, adult moderation, reporting, consent, and privacy review are still necessary; technical access controls are not legal advice or a child-safety certification. This repository change cannot create Supabase credentials or change Vercel settings for you.

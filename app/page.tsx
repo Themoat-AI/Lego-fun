@@ -10,7 +10,8 @@ type Organization = {
   theme: string;
   signup_limit: number;
   active_day: string;
-  members: number;
+  invite_code: string;
+  is_member: boolean;
 };
 type FeedItem = { id: string; org_id: string; author_id: string; message: string; created_at: string };
 type ChatMessage = { id: string; org_id: string; author_id: string; message: string; created_at: string };
@@ -27,12 +28,8 @@ export default function HomePage() {
   const configured = isSupabaseConfigured();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [authLoading, setAuthLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState('');
   const [feed, setFeed] = useState<FeedItem[]>([]);
@@ -44,6 +41,7 @@ export default function HomePage() {
   const [newMessage, setNewMessage] = useState('');
   const [newOrgName, setNewOrgName] = useState('');
   const [newOrgTheme, setNewOrgTheme] = useState('Space');
+  const [inviteCode, setInviteCode] = useState('');
   const [statusMessage, setStatusMessage] = useState('Connect to your club workspace.');
   const [busy, setBusy] = useState(false);
 
@@ -53,10 +51,7 @@ export default function HomePage() {
   );
 
   useEffect(() => {
-    if (!configured) {
-      setLoading(false);
-      return;
-    }
+    if (!configured) { setLoading(false); return; }
     const supabase = getSupabase();
     supabase.auth.getSession().then(({ data, error }) => {
       if (error) setStatusMessage(error.message);
@@ -75,31 +70,26 @@ export default function HomePage() {
     const supabase = getSupabase();
     const [profileResult, orgResult] = await Promise.all([
       supabase.from('profiles').select('id, display_name').eq('id', user.id).maybeSingle(),
-      supabase.from('organizations').select('id, name, theme, signup_limit, active_day').order('created_at', { ascending: false })
+      supabase.from('organizations').select('id, name, theme, signup_limit, active_day, invite_code').order('created_at', { ascending: false })
     ]);
     if (profileResult.error) throw profileResult.error;
     if (orgResult.error) throw orgResult.error;
     const orgRows = orgResult.data ?? [];
     const orgIds = orgRows.map((org) => org.id);
-    const membershipResult = orgIds.length
-      ? await supabase.from('org_members').select('organization_id, user_id').in('organization_id', orgIds)
+    const memberResult = orgIds.length
+      ? await supabase.from('org_members').select('organization_id').eq('user_id', user.id).in('organization_id', orgIds)
       : { data: [], error: null };
-    if (membershipResult.error) throw membershipResult.error;
-    const memberCounts = new Map<string, number>();
-    (membershipResult.data ?? []).forEach((row) => memberCounts.set(row.organization_id, (memberCounts.get(row.organization_id) ?? 0) + 1));
-    const nextOrganizations: Organization[] = orgRows.map((org) => ({
-      ...org,
-      members: memberCounts.get(org.id) ?? 0
-    }));
+    if (memberResult.error) throw memberResult.error;
+    const membershipIds = new Set((memberResult.data ?? []).map((row) => row.organization_id));
+    const nextOrganizations: Organization[] = orgRows.map((org) => ({ ...org, is_member: membershipIds.has(org.id) }));
     setOrganizations(nextOrganizations);
     if (!selectedOrgId && nextOrganizations.length) setSelectedOrgId(nextOrganizations[0].id);
-    if (selectedOrgId && !nextOrganizations.some((org) => org.id === selectedOrgId)) {
-      setSelectedOrgId(nextOrganizations[0]?.id ?? '');
-    }
+    if (selectedOrgId && !nextOrganizations.some((org) => org.id === selectedOrgId)) setSelectedOrgId(nextOrganizations[0]?.id ?? '');
     const profileName = profileResult.data?.display_name ?? user.user_metadata?.display_name ?? '';
     setDisplayName(profileName);
     const orgId = selectedOrgId || nextOrganizations[0]?.id;
-    if (!orgId) {
+    const selected = nextOrganizations.find((org) => org.id === orgId);
+    if (!orgId || !selected?.is_member) {
       setFeed([]); setMessages([]); setDriveFiles([]); setSignedUpToday(false);
       return;
     }
@@ -111,12 +101,8 @@ export default function HomePage() {
       supabase.from('daily_signups').select('id').eq('organization_id', orgId).eq('user_id', user.id).eq('signup_date', today).maybeSingle(),
       supabase.from('profiles').select('id, display_name')
     ]);
-    for (const result of [postsResult, messagesResult, filesResult, signupResult, profilesResult]) {
-      if (result.error) throw result.error;
-    }
-    setFeed(postsResult.data ?? []);
-    setMessages(messagesResult.data ?? []);
-    setDriveFiles(filesResult.data ?? []);
+    for (const result of [postsResult, messagesResult, filesResult, signupResult, profilesResult]) if (result.error) throw result.error;
+    setFeed(postsResult.data ?? []); setMessages(messagesResult.data ?? []); setDriveFiles(filesResult.data ?? []);
     setSignedUpToday(Boolean(signupResult.data));
     const nameMap: Record<string, string> = {};
     (profilesResult.data ?? []).forEach((profile: Profile) => { nameMap[profile.id] = profile.display_name; });
@@ -129,14 +115,12 @@ export default function HomePage() {
       return;
     }
     setLoading(true);
-    loadWorkspace()
-      .then(() => setStatusMessage('Connected to your live club workspace.'))
-      .catch((error: Error) => setStatusMessage(error.message))
-      .finally(() => setLoading(false));
+    loadWorkspace().then(() => setStatusMessage('Connected to your live club workspace.'))
+      .catch((error: Error) => setStatusMessage(error.message)).finally(() => setLoading(false));
   }, [user, loadWorkspace]);
 
   useEffect(() => {
-    if (!user || !selectedOrgId) return;
+    if (!user || !selectedOrgId || !selectedOrg?.is_member) return;
     const supabase = getSupabase();
     const channel = supabase.channel(`workspace-${selectedOrgId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'posts', filter: `org_id=eq.${selectedOrgId}` }, () => { void loadWorkspace(); })
@@ -145,44 +129,37 @@ export default function HomePage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'media_files', filter: `org_id=eq.${selectedOrgId}` }, () => { void loadWorkspace(); })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [user, selectedOrgId, loadWorkspace]);
+  }, [user, selectedOrgId, selectedOrg, loadWorkspace]);
 
-  const handleAuth = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!configured) return;
-    setAuthLoading(true);
+  const handleContinue = async () => {
+    setBusy(true);
     try {
-      const supabase = getSupabase();
-      if (isSignUp) {
-        const normalized = username.trim().toLowerCase();
-        if (normalized.length < 3 || blockedNameWords.some((word) => normalized.includes(word))) {
-          throw new Error('Choose a display name with at least 3 characters that is appropriate for a club.');
-        }
-        const { data, error } = await supabase.auth.signUp({
-          email: email.trim(), password,
-          options: { data: { display_name: username.trim() } }
-        });
-        if (error) throw error;
-        if (data.user) {
-          const { error: profileError } = await supabase.from('profiles').upsert({ id: data.user.id, display_name: username.trim() });
-          if (profileError) throw profileError;
-        }
-        setStatusMessage(data.session
-          ? 'Account created. If email confirmation is enabled, verify your guardian email to sign in.'
-          : 'Check the guardian email inbox to confirm the account, then sign in.');
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (error) throw error;
-      }
-      setPassword('');
-    } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Unable to authenticate.');
-    } finally { setAuthLoading(false); }
+      const { error } = await getSupabase().auth.signInAnonymously();
+      if (error) throw error;
+      setStatusMessage('Private guest session created. Choose a display name to get started.');
+    } catch (error) { setStatusMessage(error instanceof Error ? error.message : 'Could not start a guest session.'); }
+    finally { setBusy(false); }
   };
 
   const handleSignOut = async () => {
     const { error } = await getSupabase().auth.signOut();
     setStatusMessage(error?.message ?? 'You have signed out.');
+  };
+
+  const handleSaveName = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!user) return;
+    const name = username.trim();
+    if (name.length < 3 || name.length > 32 || blockedNameWords.some((word) => name.toLowerCase().includes(word))) {
+      setStatusMessage('Choose an appropriate display name of 3–32 characters.'); return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await getSupabase().from('profiles').upsert({ id: user.id, display_name: name });
+      if (error) throw error;
+      setDisplayName(name); setUsername(''); setStatusMessage('Display name saved.');
+    } catch (error) { setStatusMessage(error instanceof Error ? error.message : 'Could not save your display name.'); }
+    finally { setBusy(false); }
   };
 
   const handleCreateOrg = async (event: FormEvent) => {
@@ -192,28 +169,30 @@ export default function HomePage() {
     try {
       const { data, error } = await getSupabase().from('organizations')
         .insert({ name: newOrgName.trim(), theme: newOrgTheme, created_by: user.id })
-        .select('id').single();
+        .select('id, invite_code').single();
       if (error) throw error;
       setNewOrgName(''); setSelectedOrgId(data.id);
-      setStatusMessage('Club created and saved to the shared workspace.');
+      await loadWorkspace();
+      setStatusMessage(`Club created. Share invite code ${data.invite_code} with people you trust.`);
     } catch (error) { setStatusMessage(error instanceof Error ? error.message : 'Could not create club.'); }
     finally { setBusy(false); }
   };
 
-  const handleJoinOrg = async () => {
-    if (!selectedOrg) return;
+  const handleJoinOrg = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!inviteCode.trim()) return;
     setBusy(true);
     try {
-      const { error } = await getSupabase().rpc('join_organization', { target_organization: selectedOrg.id });
+      const { data, error } = await getSupabase().rpc('join_organization_by_code', { code: inviteCode.trim().toUpperCase() });
       if (error) throw error;
-      await loadWorkspace();
-      setStatusMessage('You joined the club.');
-    } catch (error) { setStatusMessage(error instanceof Error ? error.message : 'Could not join this club.'); }
+      setInviteCode(''); setSelectedOrgId(data); await loadWorkspace();
+      setStatusMessage('You joined the club. The feed and chat are now shared live.');
+    } catch (error) { setStatusMessage(error instanceof Error ? error.message : 'Could not join this club. Check the invite code.'); }
     finally { setBusy(false); }
   };
 
   const handleDailySignup = async () => {
-    if (!selectedOrg) return;
+    if (!selectedOrg?.is_member) return;
     setBusy(true);
     try {
       const { error } = await getSupabase().rpc('signup_for_day', { target_organization: selectedOrg.id });
@@ -225,24 +204,24 @@ export default function HomePage() {
 
   const handleAddPost = async (event: FormEvent) => {
     event.preventDefault();
-    if (!user || !selectedOrg || !newPost.trim()) return;
+    if (!user || !selectedOrg?.is_member || !newPost.trim()) return;
     setBusy(true);
     try {
       const { error } = await getSupabase().from('posts').insert({ org_id: selectedOrg.id, author_id: user.id, message: newPost.trim() });
       if (error) throw error;
-      setNewPost(''); await loadWorkspace(); setStatusMessage('Update posted to the shared club feed.');
+      setNewPost(''); await loadWorkspace(); setStatusMessage('Update posted to the shared live feed.');
     } catch (error) { setStatusMessage(error instanceof Error ? error.message : 'Could not post update.'); }
     finally { setBusy(false); }
   };
 
   const handleSendMessage = async (event: FormEvent) => {
     event.preventDefault();
-    if (!user || !selectedOrg || !newMessage.trim()) return;
+    if (!user || !selectedOrg?.is_member || !newMessage.trim()) return;
     setBusy(true);
     try {
       const { error } = await getSupabase().from('messages').insert({ org_id: selectedOrg.id, author_id: user.id, message: newMessage.trim() });
       if (error) throw error;
-      setNewMessage(''); await loadWorkspace(); setStatusMessage('Message sent to club chat.');
+      setNewMessage(''); await loadWorkspace(); setStatusMessage('Message sent to the live club chat.');
     } catch (error) { setStatusMessage(error instanceof Error ? error.message : 'Could not send message.'); }
     finally { setBusy(false); }
   };
@@ -250,27 +229,17 @@ export default function HomePage() {
   const handleDriveUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     const file = input.files?.[0];
-    if (!file || !user || !selectedOrg) return;
-    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
-      setStatusMessage('Upload an MP4, MOV, or WebM video.'); input.value = ''; return;
-    }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setStatusMessage('Videos must be 50 MB or smaller.'); input.value = ''; return;
-    }
+    if (!file || !user || !selectedOrg?.is_member) return;
+    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) { setStatusMessage('Upload an MP4, MOV, or WebM video.'); input.value = ''; return; }
+    if (file.size > MAX_UPLOAD_BYTES) { setStatusMessage('Videos must be 50 MB or smaller.'); input.value = ''; return; }
     setBusy(true);
     const path = `${selectedOrg.id}/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     try {
       const supabase = getSupabase();
       const { error: uploadError } = await supabase.storage.from('org-media').upload(path, file, { contentType: file.type, upsert: false });
       if (uploadError) throw uploadError;
-      const { error: metadataError } = await supabase.from('media_files').insert({
-        org_id: selectedOrg.id, owner_id: user.id, object_path: path,
-        original_name: file.name, content_type: file.type, size_bytes: file.size
-      });
-      if (metadataError) {
-        await supabase.storage.from('org-media').remove([path]);
-        throw metadataError;
-      }
+      const { error: metadataError } = await supabase.from('media_files').insert({ org_id: selectedOrg.id, owner_id: user.id, object_path: path, original_name: file.name, content_type: file.type, size_bytes: file.size });
+      if (metadataError) { await supabase.storage.from('org-media').remove([path]); throw metadataError; }
       await loadWorkspace(); setStatusMessage(`Uploaded ${file.name} to the private club library.`);
     } catch (error) { setStatusMessage(error instanceof Error ? error.message : 'Upload failed.'); }
     finally { setBusy(false); input.value = ''; }
@@ -282,56 +251,23 @@ export default function HomePage() {
     else window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
   };
 
-  if (!configured) return (
-    <main className="page-shell"><section className="panel setup-panel">
-      <p className="eyebrow">LEGO FUN CLUB</p><h1>Connect your Supabase project</h1>
-      <p>This app no longer uses sample or mock data. Add <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to <code>.env.local</code> for local development and to Vercel Environment Variables for deployment, then run the database setup in <code>supabase/migrations/</code>.</p>
-      <p>Only use Supabase’s public anon/publishable key here. Never put a service-role key in browser-visible environment variables.</p>
-    </section></main>
-  );
+  if (!configured) return <main className="page-shell"><section className="panel setup-panel"><p className="eyebrow">LEGO FUN CLUB</p><h1>Connect your Supabase project</h1><p>This app has no sample or mock data. Add <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to <code>.env.local</code> and Vercel, then run both SQL migrations in <code>supabase/migrations/</code>.</p><p>Use only the public anon/publishable key. Never expose a service-role key.</p></section></main>;
   if (loading) return <main className="page-shell"><section className="panel"><p>Connecting to the live workspace…</p></section></main>;
 
-  if (!user) return (
-    <main className="page-shell"><section className="hero panel"><div>
-      <p className="eyebrow">LEGO FUN CLUB</p><h1>Build teams, plan projects, and share wins.</h1>
-      <p className="hero-copy">A private club workspace for families, guardians, and their builders.</p>
-      <p className="safety-note"><strong>Guardian-managed accounts:</strong> use a parent or guardian email address. Do not enter a child’s email or other sensitive personal information.</p>
-    </div><div className="panel auth-panel"><h2>{isSignUp ? 'Create a guardian account' : 'Sign in'}</h2>
-      <form className="stack-form" onSubmit={handleAuth}>
-        {isSignUp && <input required minLength={3} maxLength={32} value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Builder display name" autoComplete="nickname" />}
-        <input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Guardian email" autoComplete="email" />
-        <input required minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password (at least 8 characters)" autoComplete={isSignUp ? 'new-password' : 'current-password'} />
-        <button disabled={authLoading} type="submit">{authLoading ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}</button>
-      </form>
-      <button className="text-button" type="button" onClick={() => setIsSignUp(!isSignUp)}>{isSignUp ? 'Already have an account? Sign in' : 'New here? Create a guardian account'}</button>
-      <p role="status">{statusMessage}</p>
-    </div></section></main>
-  );
+  if (!user) return <main className="page-shell"><section className="hero panel"><div><p className="eyebrow">LEGO FUN CLUB</p><h1>Build teams, plan projects, and share wins.</h1><p className="hero-copy">Create a private guest profile with no email address, then share a club invite code with people you trust.</p><p className="safety-note"><strong>Guest accounts are anonymous.</strong> If you clear this browser or lose its session, you may not be able to recover the account. Use a display name only; do not share personal information.</p></div><div className="panel auth-panel"><h2>Continue without email</h2><p>{statusMessage}</p><button disabled={busy} type="button" onClick={handleContinue}>{busy ? 'Connecting…' : 'Continue as guest'}</button><p className="muted">Guest sign-in must be enabled in Supabase Authentication settings.</p></div></section></main>;
 
-  return (
-    <main className="page-shell">
-      <section className="hero panel"><div><p className="eyebrow">LEGO FUN CLUB</p><h1>Build teams, plan projects, and share wins.</h1>
-        <p className="hero-copy">A shared workspace for clubs, build-day signups, updates, chat, and private video sharing.</p>
-        <p className="safety-note">Guardian-managed account · Keep personal information private · Report concerns to your club’s adult organizer.</p>
-      </div><div className="status-card"><div className="pill success">Supabase connected</div><strong>{statusMessage}</strong><span>Signed in as {displayName || user.email}</span><button className="secondary" type="button" onClick={handleSignOut}>Sign out</button></div></section>
+  return <main className="page-shell">
+    <section className="hero panel"><div><p className="eyebrow">LEGO FUN CLUB</p><h1>Build teams, plan projects, and share wins.</h1><p className="hero-copy">A live shared workspace for clubs, build-day signups, updates, chat, and private video sharing.</p><p className="safety-note">Guest account · Use a display name only · Share invite codes only with people you trust.</p></div><div className="status-card"><div className="pill success">Supabase connected</div><strong>{statusMessage}</strong><span>{displayName || 'Choose a display name'} · Guest session</span><button className="secondary" type="button" onClick={handleSignOut}>Sign out</button></div></section>
 
-      <section className="stats-grid"><div className="panel stat-card"><span>Clubs</span><strong>{organizations.length}</strong></div><div className="panel stat-card"><span>Members in selected club</span><strong>{selectedOrg?.members ?? 0}</strong></div><div className="panel stat-card"><span>Today’s signups</span><strong>{signedUpToday ? 'Signed up' : 'Not signed up'}</strong></div><div className="panel stat-card"><span>Shared videos</span><strong>{driveFiles.length}</strong></div></section>
+    <section className="stats-grid"><div className="panel stat-card"><span>My clubs</span><strong>{organizations.filter((org) => org.is_member).length}</strong></div><div className="panel stat-card"><span>Posts in selected club</span><strong>{selectedOrg?.is_member ? feed.length : 0}</strong></div><div className="panel stat-card"><span>Today’s signup</span><strong>{signedUpToday ? 'Signed up' : 'Not signed up'}</strong></div><div className="panel stat-card"><span>Shared videos</span><strong>{driveFiles.length}</strong></div></section>
 
-      <section className="content-grid"><div className="panel"><h2>Your builder profile</h2><form className="stack-form" onSubmit={async (event) => {
-        event.preventDefault(); const trimmed = username.trim();
-        if (trimmed.length < 3 || blockedNameWords.some((word) => trimmed.toLowerCase().includes(word))) { setStatusMessage('Choose an appropriate display name of at least 3 characters.'); return; }
-        setBusy(true); const { error } = await getSupabase().from('profiles').upsert({ id: user.id, display_name: trimmed });
-        if (error) setStatusMessage(error.message); else { setDisplayName(trimmed); setStatusMessage('Profile saved.'); }
-        setBusy(false);
-      }}><input value={username} onChange={(event) => setUsername(event.target.value)} placeholder={displayName || 'Builder display name'} maxLength={32} /><button disabled={busy} type="submit">Save display name</button></form><p className="muted">Guardian account: {user.email}</p></div>
-      <div className="panel"><h2>Create a club</h2><form onSubmit={handleCreateOrg} className="stack-form"><input required maxLength={80} value={newOrgName} onChange={(event) => setNewOrgName(event.target.value)} placeholder="Club name" /><select value={newOrgTheme} onChange={(event) => setNewOrgTheme(event.target.value)}><option>Space</option><option>City</option><option>Castle</option><option>Animals</option><option>Vehicles</option></select><button disabled={busy} type="submit">Create club</button></form></div></section>
+    <section className="content-grid"><div className="panel"><h2>Builder profile</h2><form className="stack-form" onSubmit={handleSaveName}><input required minLength={3} maxLength={32} value={username} onChange={(event) => setUsername(event.target.value)} placeholder={displayName || 'Choose a display name'} /><button disabled={busy} type="submit">Save display name</button></form><p className="muted">No email is attached to this guest account.</p></div><div className="panel"><h2>Create a club</h2><form onSubmit={handleCreateOrg} className="stack-form"><input required maxLength={80} value={newOrgName} onChange={(event) => setNewOrgName(event.target.value)} placeholder="Club name" /><select value={newOrgTheme} onChange={(event) => setNewOrgTheme(event.target.value)}><option>Space</option><option>City</option><option>Castle</option><option>Animals</option><option>Vehicles</option></select><button disabled={busy} type="submit">Create club</button></form></div></section>
 
-      <section className="content-grid advanced-grid"><div className="panel wide-panel"><h2>Organizations</h2>{organizations.length === 0 ? <p>No clubs yet. Create one, or ask a club organizer to invite your account.</p> : <><div className="org-list">{organizations.map((org) => <button key={org.id} className={`org-card ${selectedOrgId === org.id ? 'selected' : ''}`} type="button" onClick={() => setSelectedOrgId(org.id)}><div><strong>{org.name}</strong><p>{org.theme} project team · {org.active_day}</p></div><span>{org.members}/{org.signup_limit}</span></button>)}</div><div className="join-row"><button disabled={busy || !selectedOrg} type="button" onClick={handleJoinOrg}>Join selected club</button><button disabled={busy || !selectedOrg || signedUpToday} type="button" className="secondary" onClick={handleDailySignup}>{signedUpToday ? 'Signed up today' : 'Signup for build day (max 15)'}</button></div></>}</div>
-      <div className="panel"><h2>Team chat</h2>{!selectedOrg ? <p>Select a club to view chat.</p> : <><div className="chat-box">{messages.map((msg) => <div className="chat-item" key={msg.id}><strong>{profiles[msg.author_id] || 'Club member'}</strong><p>{msg.message}</p><small>{formatTime(msg.created_at)}</small></div>)}</div><form onSubmit={handleSendMessage} className="stack-form compact"><input required maxLength={2000} value={newMessage} onChange={(event) => setNewMessage(event.target.value)} placeholder="Message the team" /><button disabled={busy} type="submit">Send</button></form></>}</div></section>
+    <section className="content-grid advanced-grid"><div className="panel wide-panel"><h2>Join a club</h2><p>Ask a club member for its invite code.</p><form onSubmit={handleJoinOrg} className="stack-form compact"><input required maxLength={10} value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder="Club invite code" /><button disabled={busy} type="submit">Join with code</button></form><h2 className="section-heading">My clubs</h2>{organizations.filter((org) => org.is_member).length === 0 ? <p>You haven’t joined a club yet. Create one or use an invite code.</p> : <div className="org-list">{organizations.filter((org) => org.is_member).map((org) => <button key={org.id} className={`org-card ${selectedOrgId === org.id ? 'selected' : ''}`} type="button" onClick={() => setSelectedOrgId(org.id)}><div><strong>{org.name}</strong><p>{org.theme} project team · {org.active_day}</p><small>Invite code: {org.invite_code}</small></div><span>Member</span></button>)}</div>}{selectedOrg?.is_member && <div className="join-row"><button disabled={busy} type="button" className="secondary" onClick={handleDailySignup}>{signedUpToday ? 'Signed up today' : 'Signup for build day (max 15)'}</button></div>}</div>
+      <div className="panel"><h2>Team chat</h2>{!selectedOrg?.is_member ? <p>Join or create a club to use its live chat.</p> : <><div className="chat-box">{messages.map((msg) => <div className="chat-item" key={msg.id}><strong>{profiles[msg.author_id] || 'Club member'}</strong><p>{msg.message}</p><small>{formatTime(msg.created_at)}</small></div>)}</div><form onSubmit={handleSendMessage} className="stack-form compact"><input required maxLength={2000} value={newMessage} onChange={(event) => setNewMessage(event.target.value)} placeholder="Message the team" /><button disabled={busy} type="submit">Send</button></form></>}</div></section>
 
-      <section className="content-grid advanced-grid"><div className="panel wide-panel"><h2>Club updates</h2>{!selectedOrg ? <p>Select a club to view updates.</p> : <><form onSubmit={handleAddPost} className="stack-form compact"><input required maxLength={2000} value={newPost} onChange={(event) => setNewPost(event.target.value)} placeholder="Share a build update or event note" /><button disabled={busy} type="submit">Post update</button></form><div className="feed-stream">{feed.map((item) => <article key={item.id} className="feed-item"><div className="feed-header"><span className="feed-emoji">🧱</span><div><strong>{profiles[item.author_id] || 'Club member'}</strong><small>{formatTime(item.created_at)}</small></div></div><p>{item.message}</p></article>)}</div></>}</div>
-      <div className="panel"><h2>Private video library</h2><p className="muted">MP4, MOV, or WebM · 50 MB maximum · visible only to club members.</p><label className="upload-box"><input type="file" onChange={handleDriveUpload} accept="video/mp4,video/quicktime,video/webm" disabled={!selectedOrg || busy} /><span>{busy ? 'Please wait…' : 'Upload a video'}</span></label><div className="drive-list">{driveFiles.map((file) => <button key={file.id} className="drive-item media-button" type="button" onClick={() => void openVideo(file.object_path)}><strong>{file.original_name}</strong><span>Video</span><small>{formatSize(file.size_bytes)} · {formatTime(file.created_at)} · Open secure link</small></button>)}</div></div></section>
-      <p className="muted setup-footnote">This app provides technical access controls, not child-safety certification. An adult should moderate clubs and review applicable privacy, consent, and legal requirements before inviting children.</p>
-    </main>
-  );
+    <section className="content-grid advanced-grid"><div className="panel wide-panel"><h2>Live club stream</h2>{!selectedOrg?.is_member ? <p>Join or create a club to post and view updates.</p> : <><form onSubmit={handleAddPost} className="stack-form compact"><input required maxLength={2000} value={newPost} onChange={(event) => setNewPost(event.target.value)} placeholder="Share a build update or event note" /><button disabled={busy} type="submit">Post update</button></form><div className="feed-stream">{feed.map((item) => <article key={item.id} className="feed-item"><div className="feed-header"><span className="feed-emoji">🧱</span><div><strong>{profiles[item.author_id] || 'Club member'}</strong><small>{formatTime(item.created_at)}</small></div></div><p>{item.message}</p></article>)}</div></>}</div>
+      <div className="panel"><h2>Private video library</h2><p className="muted">MP4, MOV, or WebM · 50 MB maximum · visible only to club members.</p><label className="upload-box"><input type="file" onChange={handleDriveUpload} accept="video/mp4,video/quicktime,video/webm" disabled={!selectedOrg?.is_member || busy} /><span>{busy ? 'Please wait…' : 'Upload a video'}</span></label><div className="drive-list">{driveFiles.map((file) => <button key={file.id} className="drive-item media-button" type="button" onClick={() => void openVideo(file.object_path)}><strong>{file.original_name}</strong><span>Video</span><small>{formatSize(file.size_bytes)} · {formatTime(file.created_at)} · Open secure link</small></button>)}</div></div></section>
+    <p className="muted setup-footnote">This app’s technical controls are not child-safety certification. Have an adult moderate clubs and review privacy and consent requirements before inviting children.</p>
+  </main>;
 }
